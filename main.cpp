@@ -81,14 +81,14 @@ int main(int argc, char *argv[])
 		program.setProjectionMatrix(projectionMatrix);
 		program.setViewMatrix(viewMatrix);
 
-		float ticks = (float)SDL_GetTicks() / 1000.0f;
+		float ticks = (float)SDL_GetTicks() / 1500.0f;
 		float elapsed = ticks - lastFrameTicks;
 		lastFrameTicks = ticks;
 
 		//UFO
 		glBindTexture(GL_TEXTURE_2D, ufoTexture);
 
-		float uVertices[] = { -0.5, 0.5, 0.5, 0.5, 0.5, 1.5, -0.5, 0.5, 0.5, 1.5, -0.5, 1.5 };
+		float uVertices[] = { -0.5, 0.75, 0.5, 0.75, 0.5, 1.75, -0.5, 0.75, 0.5, 1.75, -0.5, 1.75 };
 
 		glVertexAttribPointer(program.positionAttribute, 2, GL_FLOAT, false, 0, uVertices);
 		glEnableVertexAttribArray(program.positionAttribute);
@@ -119,10 +119,10 @@ int main(int argc, char *argv[])
 		glDisableVertexAttribArray(program.positionAttribute);
 		glDisableVertexAttribArray(program.texCoordAttribute);
 
-		//Laser
+		//Laser, animated, sorta (does this count?)
 		glBindTexture(GL_TEXTURE_2D, laserTexture);
 
-		float lVertices[] = { -0.12, -0.5, 0.12, -0.5, 0.12, 0.0, -0.12, -0.5, 0.12, 0.0, -0.12, 0.0 };
+		float lVertices[] = { -0.1, -1.0 + ticks, 0.1, -1.0 + ticks, 0.1, -0.5 + ticks, -0.1, -1.0 + ticks, 0.1, -0.5 + ticks, -0.1, -0.5 + ticks };
 
 		glVertexAttribPointer(program.positionAttribute, 2, GL_FLOAT, false, 0, lVertices);
 		glEnableVertexAttribArray(program.positionAttribute);
