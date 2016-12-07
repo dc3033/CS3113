@@ -17,11 +17,7 @@
 
 #define MAX_TIMESTEPS 6
 #define FIXED_TIMESTEP 0.016666f
-#define LEVEL_HEIGHT 32
-#define LEVEL_WIDTH 128
-#define TILE_SIZE 0.05f
-#define SPRITE_COUNT_X 30
-#define SPRITE_COUNT_Y 30
+
 using namespace std;
 
 #ifdef _WINDOWS
@@ -32,147 +28,19 @@ using namespace std;
 
 SDL_Window* displayWindow;
 
-int mapWidth;
-int mapHeight;
-unsigned char** levelData;
 GLuint fontSheet;
-GLuint spriteSheet;
+GLuint sprite;
 Entity player;
-vector<Entity> coinVector;
-int score = 0;
+Entity rRectangle;
+Entity pRectangle;
+Entity bSquare;
+Entity gSquare;
 
-enum GameState {STATE_GAME_LEVEL, STATE_WIN_GAME, STATE_LOSE_GAME};
-
-int state = STATE_GAME_LEVEL;
-
-float gravity = -0.2;
-
-bool readHeader(std::ifstream &stream) {
-	string line;
-	mapWidth = -1;
-	mapHeight = -1;
-	while (getline(stream, line)) {
-		if (line == "") { break; }
-
-		istringstream sStream(line);
-		string key, value;
-		getline(sStream, key, '=');
-		getline(sStream, value);
-
-		if (key == "width") {
-			mapWidth = atoi(value.c_str());
-		}
-		else if (key == "height"){
-			mapHeight = atoi(value.c_str());
-		}
-	}
-
-	if (mapWidth == -1 || mapHeight == -1) {
-		return false;
-	}
-	else {
-		levelData = new unsigned char*[mapHeight];
-		for (int i = 0; i < mapHeight; ++i) {
-			levelData[i] = new unsigned char[mapWidth];
-		}
-		return true;
-	}
-}
-
-bool readLayerData(std::ifstream &stream) {
-	string line;
-	while (getline(stream, line)) {
-		if (line == "") { break; }
-		istringstream sStream(line);
-		string key, value;
-		getline(sStream, key, '=');
-		getline(sStream, value);
-		if (key == "data") {
-			for (int y = 0; y < LEVEL_HEIGHT; y++) {
-				getline(stream, line);
-				istringstream lineStream(line); 
-				string tile;
-
-				for (int x = 0; x < LEVEL_WIDTH; x++) {
-					getline(lineStream, tile, ',');
-					unsigned char val = (unsigned char)atoi(tile.c_str());
-					if (val > 0) {
-						levelData[y][x] = val - 1;
-					}
-					else {
-						levelData[y][x] = 0;
-					}
-				}
-			}
-		}
-	}
-	return true;
-}
-
-void placeEntity(string type, float placeX, float placeY){
-	if (type == "Player"){
-		player.x = placeX;
-		player.y = placeY;
-	}
-	if (type == "Coin"){
-		Entity coin;
-		coin.sprite = SheetSprite(spriteSheet, 78, 30, 30);
-		coin.x = placeX;
-		coin.y = placeY;
-		coinVector.push_back(coin);
-	}
-}
-
-bool readEntityData(std::ifstream &stream) {
-
-	string line;
-	string type;
-
-	while (getline(stream, line)) {
-		if (line == "") { break; }
-
-		istringstream sStream(line);
-		string key, value;
-		getline(sStream, key, '=');
-		getline(sStream, value);
-
-		if (key == "type"){
-			type = value;
-		}
-		else if (key == "location") {
-
-			istringstream lineStream(value);
-			string xPosition, yPosition;
-			getline(lineStream, xPosition, ',');
-			getline(lineStream, yPosition, ',');
-
-			float placeX = atoi(xPosition.c_str()) / 16 * TILE_SIZE;
-			float placeY = atoi(yPosition.c_str()) / 16 * -TILE_SIZE;
-
-			placeEntity(type, placeX, placeY);
-		}
-	}
-	return true;
-}
-
-void buildLevel(){
-	ifstream infile("hwMap.txt");
-	string line;
-	while (getline(infile, line)) {
-
-		if (line == "[header]") {
-			if (!readHeader(infile)) {
-				return;
-			}
-		}
-		else if (line == "[layer]") {
-			readLayerData(infile);
-		}
-		else if (line == "[ObjectLayer]") {
-			readEntityData(infile);
-		}
-	}
-}
+bool rLeft = true;
+bool pUp = true;
+bool bGrow = true;
+bool gLeft = true;
+bool gGrow = true;
 
 GLuint LoadTexture(const char *image_path) {
 	SDL_Surface *surface = IMG_Load(image_path);
@@ -230,118 +98,78 @@ void DrawText(ShaderProgram *program, int fontTexture, std::string text, float s
 
 }
 
-bool isSolid(unsigned int tile){
-	switch (tile){
-	case 121:
-	case 122:
-	case 123:
-	case 152:
-	case 154:
-	case 301:
-	case 302:
-	case 303:
-	case 332:
+bool testSATSeparationForEdge(float edgeX, float edgeY, const std::vector<Vector> &points1, const std::vector<Vector> &points2) {
+	float normalX = -edgeY;
+	float normalY = edgeX;
+	float len = sqrtf(normalX*normalX + normalY*normalY);
+	normalX /= len;
+	normalY /= len;
+
+	std::vector<float> e1Projected;
+	std::vector<float> e2Projected;
+
+	for (int i = 0; i < points1.size(); i++) {
+		e1Projected.push_back(points1[i].x * normalX + points1[i].y * normalY);
+	}
+	for (int i = 0; i < points2.size(); i++) {
+		e2Projected.push_back(points2[i].x * normalX + points2[i].y * normalY);
+	}
+
+	std::sort(e1Projected.begin(), e1Projected.end());
+	std::sort(e2Projected.begin(), e2Projected.end());
+
+	float e1Min = e1Projected[0];
+	float e1Max = e1Projected[e1Projected.size() - 1];
+	float e2Min = e2Projected[0];
+	float e2Max = e2Projected[e2Projected.size() - 1];
+	float e1Width = fabs(e1Max - e1Min);
+	float e2Width = fabs(e2Max - e2Min);
+	float e1Center = e1Min + (e1Width / 2.0);
+	float e2Center = e2Min + (e2Width / 2.0);
+	float dist = fabs(e1Center - e2Center);
+	float p = dist - ((e1Width + e2Width) / 2.0);
+
+	if (p < 0) {
 		return true;
-		break;
-	default:
-		return false;
-		break;
 	}
+	return false;
 }
 
-void worldToTileCoordinates(float worldX, float worldY, int *gridX, int *gridY)
-{
-	*gridX = (int)(worldX / TILE_SIZE);
-	*gridY = (int)(-worldY / TILE_SIZE);
-}
+bool checkSATCollision(const std::vector<Vector> &e1Points, const std::vector<Vector> &e2Points) {
+	for (int i = 0; i < e1Points.size(); i++) {
+		float edgeX, edgeY;
 
-float checkCollisionY(float x, float y)
-{
-	int gridX, gridY;
-	worldToTileCoordinates(x, y, &gridX, &gridY);
-	if (gridX < 0 || gridX > 128 || gridY < 0 || gridY > 40)
-		return 0.0f;
+		if (i == e1Points.size() - 1) {
+			edgeX = e1Points[0].x - e1Points[i].x;
+			edgeY = e1Points[0].y - e1Points[i].y;
+		}
+		else {
+			edgeX = e1Points[i + 1].x - e1Points[i].x;
+			edgeY = e1Points[i + 1].y - e1Points[i].y;
+		}
 
-	if (isSolid(levelData[gridY][gridX]))
-	{
-		float yCoord = (gridY * TILE_SIZE) - (TILE_SIZE*0.0f);
-		return -y - yCoord;
+		bool result = testSATSeparationForEdge(edgeX, edgeY, e1Points, e2Points);
+		if (!result) {
+			return false;
+		}
 	}
-	return 0.0;
-}
+	for (int i = 0; i < e2Points.size(); i++) {
+		float edgeX, edgeY;
 
-float checkCollisionX(float x, float y)
-{
-	int gridX, gridY;
-	worldToTileCoordinates(x, y, &gridX, &gridY);
-	if (gridX < 0 || gridX > 128 || gridY < 0 || gridY > 40)
-		return 0.0f;
-
-	if (isSolid(levelData[gridY][gridX]))
-	{
-		float xCoord = (gridX * TILE_SIZE) - (TILE_SIZE*0.0f);
-		return x - xCoord;
+		if (i == e2Points.size() - 1) {
+			edgeX = e2Points[0].x - e2Points[i].x;
+			edgeY = e2Points[0].y - e2Points[i].y;
+		}
+		else {
+			edgeX = e2Points[i + 1].x - e2Points[i].x;
+			edgeY = e2Points[i + 1].y - e2Points[i].y;
+		}
+		bool result = testSATSeparationForEdge(edgeX, edgeY, e1Points, e2Points);
+		if (!result) {
+			return false;
+		}
 	}
-	return 0.0;
-}
-
-void levelCollisionY(Entity* entity)
-{
-	//check bottom
-	float adjust = checkCollisionY(entity->x, entity->y - entity->sprite.height * 0.5f + 0.03);
-	if (adjust != 0.0f)
-	{
-		entity->y += adjust;
-		entity->velocityY = 0.0f;
-		entity->collideBottom = true;
-	}
-
-	//check top
-	adjust = checkCollisionY(entity->x, entity->y + entity->sprite.height * 0.5f - 0.03);
-	if (adjust != 0.0f)
-	{
-		entity->y += adjust - TILE_SIZE;
-		entity->velocityY = 0.0f;
-		entity->collideTop = true;
-	}
-}
-
-void levelCollisionX(Entity* entity)
-{
-	//check left
-	float adjust = checkCollisionX(entity->x - entity->sprite.width * 0.5f, entity->y);
-	if (adjust != 0.0f)
-	{
-		entity->x += adjust * TILE_SIZE;
-		entity->velocityX = 0.0f;
-		entity->collideLeft = true;
-	}
-
-	//check right
-	adjust = checkCollisionX(entity->x + entity->sprite.width * 0.5f, entity->y);
-	if (adjust != 0.0f)
-	{
-		entity->x += (adjust - TILE_SIZE) * TILE_SIZE;
-		entity->velocityX = 0.0f;
-		entity->collideRight = true;
-	}
-}
-
-void collisionDetect(){
-	if (state != STATE_GAME_LEVEL)
-		return;
-
-	if (player.y < -1.5){
-		player.alive = false;
-		state = STATE_LOSE_GAME;
-	}
-	if (player.x > 6.33){
-		state = STATE_WIN_GAME;
-	}
-	if (player.x < 0.0){
-		player.x += .01;
-		player.velocityX = 0.0f;
-	}
+	return true;
 }
 
 float lastFrameTicks = 0.0f;
@@ -350,7 +178,7 @@ float timeLeftOver = 0.0f;
 int main(int argc, char *argv[])
 {
 	SDL_Init(SDL_INIT_VIDEO);
-	displayWindow = SDL_CreateWindow("Coin Getter", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 800, 600, SDL_WINDOW_OPENGL);
+	displayWindow = SDL_CreateWindow("SAT Collision Test", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 800, 600, SDL_WINDOW_OPENGL);
 	SDL_GLContext context = SDL_GL_CreateContext(displayWindow);
 	SDL_GL_MakeCurrent(displayWindow, context);
 	#ifdef _WINDOWS
@@ -367,10 +195,47 @@ int main(int argc, char *argv[])
 	ShaderProgram program(RESOURCE_FOLDER"vertex_textured.glsl", RESOURCE_FOLDER"fragment_textured.glsl");
 
 	fontSheet = LoadTexture("font1.png");
-	spriteSheet = LoadTexture("spritesheet_rgba.png");
-	player.sprite = SheetSprite(spriteSheet, 19, 30, 30);
-	
-	buildLevel();
+
+	sprite = LoadTexture("element_yellow_square_glossy.png");
+	player.sprite = SheetSprite(sprite);
+	player.width = 0.1;
+	player.height = 0.1;
+	player.x = 0.0;
+	player.y = 0.0;
+	player.rotation = 45;
+
+	sprite = LoadTexture("element_red_square.png");
+	rRectangle.sprite = SheetSprite(sprite);
+	rRectangle.width = 0.1;
+	rRectangle.height = 0.3;
+	rRectangle.x = 0.5;
+	rRectangle.y = 0.5;
+	rRectangle.rotation = 60;
+
+	sprite = LoadTexture("element_purple_rectangle_glossy.png");
+	pRectangle.sprite = SheetSprite(sprite);
+	pRectangle.width = 0.3;
+	pRectangle.height = 0.15;
+	pRectangle.x = -0.5;
+	pRectangle.y = -0.5;
+	pRectangle.rotation = 30;
+
+	sprite = LoadTexture("element_blue_square_glossy.png");
+	bSquare.sprite = SheetSprite(sprite);
+	bSquare.width = 0.2;
+	bSquare.height = 0.2;
+	bSquare.x = -0.5;
+	bSquare.y = 0.5;
+	bSquare.rotation = 75;
+
+	sprite = LoadTexture("element_green_square_glossy.png");
+	gSquare.sprite = SheetSprite(sprite);
+	gSquare.width = 0.2;
+	gSquare.height = 0.2;
+	gSquare.x = 0.5;
+	gSquare.y = -0.5;
+	gSquare.rotation = 105;
+
 
 	SDL_Event event;
 	bool done = false;
@@ -392,48 +257,150 @@ int main(int argc, char *argv[])
 
 		while (fixedElapsed >= FIXED_TIMESTEP) {
 			fixedElapsed -= FIXED_TIMESTEP;
-			if (state == STATE_GAME_LEVEL){
+		
+			const Uint8 *keys = SDL_GetKeyboardState(NULL);
 
-				player.collideBottom = false;
-				player.collideTop = false;
-				player.collideLeft = false;
-				player.collideRight = false;
-
-				player.velocityX += player.accelerationX * FIXED_TIMESTEP;
-				player.velocityY += player.accelerationY * FIXED_TIMESTEP;
-				player.velocityY += gravity * FIXED_TIMESTEP;
-
-				levelCollisionY(&player);
-				levelCollisionX(&player);
-
-				const Uint8 *keys = SDL_GetKeyboardState(NULL);
-
-				if (keys[SDL_SCANCODE_D]){
-					player.velocityX = 1.0f;
-				}
-				else if (keys[SDL_SCANCODE_A]){
-					player.velocityX = -1.0f;
-				}
-				else { player.velocityX = 0.0f; }
-				if (player.collideBottom){
-					if (keys[SDL_SCANCODE_SPACE]){
-						player.velocityY = 1.0f;
-					}
-				}
-				player.x += player.velocityX * FIXED_TIMESTEP;
-				player.y += player.velocityY * FIXED_TIMESTEP;
+			if (keys[SDL_SCANCODE_W]){
+				player.velocityY = 1.0f;
 			}
+			else if (keys[SDL_SCANCODE_S]){
+				player.velocityY = -1.0f;
+			}
+			else { player.velocityY = 0.0f; }
+
+			if (keys[SDL_SCANCODE_D]){
+				player.velocityX = 1.0f;
+			}
+			else if (keys[SDL_SCANCODE_A]){
+				player.velocityX = -1.0f;
+			}
+			else { player.velocityX = 0.0f; }
+
+			if (keys[SDL_SCANCODE_Q]){
+				player.rotation += 5.0f;
+			}
+			if (keys[SDL_SCANCODE_E]){
+				player.rotation -= 5.0f;
+			}
+
+			player.x += player.velocityX * FIXED_TIMESTEP;
+			player.y += player.velocityY * FIXED_TIMESTEP;
+
+			if (rRectangle.x < 0.2) rLeft = false;
+			if (rRectangle.x > 1.0) rLeft = true;
+			if (rLeft) rRectangle.velocityX = -0.5;
+			else rRectangle.velocityX = 0.5;
+
+			rRectangle.x += rRectangle.velocityX * FIXED_TIMESTEP;
+
+			if (pRectangle.y > 0) pUp = false;
+			if (pRectangle.y < -0.8) pUp = true;
+			if (pUp) pRectangle.velocityY = 0.5;
+			else pRectangle.velocityY = -0.5;
+
+			pRectangle.y += pRectangle.velocityY * FIXED_TIMESTEP;
+
+			if (bSquare.scaleX > 1.5) bGrow = false;
+			if (bSquare.scaleX < 0.5) bGrow = true;
+			if (bGrow) bSquare.scaleX = bSquare.scaleY += 0.01;
+			else bSquare.scaleX = bSquare.scaleY -= 0.01;
+
+			if (gSquare.x < 0.2) gLeft = false;
+			if (gSquare.x > 1.0) gLeft = true;
+			if (gLeft) {
+				gSquare.velocityX = -0.5;
+				gSquare.velocityY = 0.5;
+			}
+			else {
+				gSquare.velocityX = 0.5;
+				gSquare.velocityY = -0.5;
+			}
+			if (gSquare.scaleX > 1.5) gGrow = false;
+			if (gSquare.scaleX < 0.5) gGrow = true;
+			if (gGrow) gSquare.scaleX = gSquare.scaleY += 0.01;
+			else gSquare.scaleX = gSquare.scaleY -= 0.01;
+
+			gSquare.x += gSquare.velocityX * FIXED_TIMESTEP;
+			gSquare.y += gSquare.velocityY * FIXED_TIMESTEP;
+
 		}
 
 		timeLeftOver = fixedElapsed;
 
-		collisionDetect();
-
-		for (int i = 0; i < coinVector.size(); ++i){
-			if (coinVector[i].collideEntity(&player)){
-				coinVector[i].alive = false;
-				score += 1;
+		if (checkSATCollision(player.getVertices(), rRectangle.getVertices())){
+			if ((player.velocityX + rRectangle.velocityX) > 1){
+				player.x -= player.velocityX * FIXED_TIMESTEP;
+				player.y -= player.velocityY * FIXED_TIMESTEP;
+				player.velocityX = rRectangle.velocityX;
+				player.velocityY = 0;
+				player.x += player.velocityX * FIXED_TIMESTEP;
+				player.y += player.velocityY * FIXED_TIMESTEP;
 			}
+			else if (player.velocityX == 0){
+				player.x -= player.velocityX * FIXED_TIMESTEP;
+				player.y -= player.velocityY * FIXED_TIMESTEP;
+				player.velocityX = rRectangle.velocityX;
+				player.velocityY = 0;
+				player.x += player.velocityX * FIXED_TIMESTEP;
+				player.y += player.velocityY * FIXED_TIMESTEP;
+			}
+			else {
+				player.x -= player.velocityX * FIXED_TIMESTEP;
+				player.y -= player.velocityY * FIXED_TIMESTEP;
+				player.velocityX = 0;
+				player.velocityY = 0;
+				rRectangle.x -= rRectangle.velocityX * FIXED_TIMESTEP;
+				rRectangle.velocityX = 0;
+			}
+		}
+
+		if (checkSATCollision(player.getVertices(), pRectangle.getVertices())){
+			if ((player.velocityY + pRectangle.velocityY) > 1){
+				player.x -= player.velocityX * FIXED_TIMESTEP;
+				player.y -= player.velocityY * FIXED_TIMESTEP;
+				player.velocityX = 0;
+				player.velocityY = pRectangle.velocityY;
+				player.x += player.velocityX * FIXED_TIMESTEP;
+				player.y += player.velocityY * FIXED_TIMESTEP;
+			}
+			else if (player.velocityY == 0){
+				player.x -= player.velocityX * FIXED_TIMESTEP;
+				player.y -= player.velocityY * FIXED_TIMESTEP;
+				player.velocityX = 0;
+				player.velocityY = pRectangle.velocityY;
+				player.x += player.velocityX * FIXED_TIMESTEP;
+				player.y += player.velocityY * FIXED_TIMESTEP;
+			}
+			else {
+				player.x -= player.velocityX * FIXED_TIMESTEP;
+				player.y -= player.velocityY * FIXED_TIMESTEP;
+				player.velocityX = 0;
+				player.velocityY = 0;
+				pRectangle.y -= pRectangle.velocityY * FIXED_TIMESTEP;
+				pRectangle.velocityY = 0;
+			}
+		}
+
+		if (checkSATCollision(player.getVertices(), bSquare.getVertices())){
+			player.x -= player.velocityX * FIXED_TIMESTEP;
+			player.y -= player.velocityY * FIXED_TIMESTEP;
+			player.velocityX = 0;
+			player.velocityY = 0;
+			if (bGrow) bSquare.scaleY -= 0.01;
+			else bSquare.scaleY += 0.01;
+		}
+
+		if (checkSATCollision(player.getVertices(), gSquare.getVertices())){
+			player.x -= player.velocityX * FIXED_TIMESTEP;
+			player.y -= player.velocityY * FIXED_TIMESTEP;
+			player.velocityX = 0;
+			player.velocityY = 0;
+			gSquare.x -= gSquare.velocityX * FIXED_TIMESTEP;
+			gSquare.y -= gSquare.velocityY * FIXED_TIMESTEP;
+			gSquare.velocityX = 0;
+			gSquare.velocityY = 0;
+			if (gGrow) gSquare.scaleY -= 0.01;
+			else gSquare.scaleY += 0.01;
 		}
 
 		glClearColor(0.1f, 0.2f, 0.7f, 0.0f);
@@ -443,83 +410,52 @@ int main(int argc, char *argv[])
 		program.setProjectionMatrix(projectionMatrix);
 		program.setViewMatrix(viewMatrix);
 
-		if (state == STATE_GAME_LEVEL){
-			float translateX = player.x;
-			float translateY = player.y/2;
-			if (translateX > 0.0) translateX = 0.0;
-			if (translateY < 0.0) translateY = 0.0;
+        modelMatrix.identity();
+		modelMatrix.Translate(player.x, player.y, 0);
+		modelMatrix.Scale(player.scaleX, player.scaleY, 1.0);
+		modelMatrix.Rotate(player.rotation*PI / 180);
+		program.setModelMatrix(modelMatrix);
+		player.draw(program);
+		
+		modelMatrix.identity();
+		modelMatrix.Translate(rRectangle.x, rRectangle.y, 0);
+		modelMatrix.Scale(rRectangle.scaleX, rRectangle.scaleY, 1.0);
+		modelMatrix.Rotate(rRectangle.rotation*PI / 180);
+		program.setModelMatrix(modelMatrix);
+		rRectangle.draw(program);
 
-			viewMatrix.identity();
-			viewMatrix.Translate(translateX, translateY, 0.0f);
-			glBindTexture(GL_TEXTURE_2D, spriteSheet);
-			glEnable(GL_BLEND);
-			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		modelMatrix.identity();
+		modelMatrix.Translate(pRectangle.x, pRectangle.y, 0);
+		modelMatrix.Scale(pRectangle.scaleX, pRectangle.scaleY, 1.0);
+		modelMatrix.Rotate(pRectangle.rotation*PI / 180);
+		program.setModelMatrix(modelMatrix);		
+		pRectangle.draw(program);
 
-			vector<float> vertexData;
-			vector<float> texCoordData;
-			for (int y = 0; y < mapHeight; y++) {
-				for (int x = 0; x < mapWidth; x++) {
-					if (levelData[y][x] != 0){
-						float u = (float)(((int)levelData[y][x]) % SPRITE_COUNT_X) / (float)SPRITE_COUNT_X;
-						float v = (float)(((int)levelData[y][x]) / SPRITE_COUNT_X) / (float)SPRITE_COUNT_Y;
-						float spriteWidth = 1.0f / (float)SPRITE_COUNT_X;
-						float spriteHeight = 1.0f / (float)SPRITE_COUNT_Y;
-						vertexData.insert(vertexData.end(), {
-							TILE_SIZE * x, -TILE_SIZE * y,
-							TILE_SIZE * x, (-TILE_SIZE * y) - TILE_SIZE,
-							(TILE_SIZE * x) + TILE_SIZE, -TILE_SIZE * y,
-							(TILE_SIZE * x) + TILE_SIZE, (-TILE_SIZE * y) - TILE_SIZE,
-							(TILE_SIZE * x) + TILE_SIZE, -TILE_SIZE * y,
-							TILE_SIZE * x, (-TILE_SIZE * y) - TILE_SIZE
-						});
-						texCoordData.insert(texCoordData.end(), { 
-							u, v,
-							u, v + spriteHeight,
-							u + spriteWidth, v,
-							u + spriteWidth, v + spriteHeight,
-							u + spriteWidth, v,
-							u, v + spriteHeight
-						});
-					}
-				}
-				
-			}
-			//viewMatrix.Translate(TILE_SIZE * LEVEL_WIDTH / 2, -TILE_SIZE * LEVEL_HEIGHT / 2, 0.0f);
-			glUseProgram(program.programID);
+		modelMatrix.identity();
+		modelMatrix.Translate(bSquare.x, bSquare.y, 0);
+		modelMatrix.Scale(bSquare.scaleX, bSquare.scaleY, 1.0);
+		modelMatrix.Rotate(bSquare.rotation*PI / 180);
+		program.setModelMatrix(modelMatrix);
+		
+		bSquare.draw(program);
 
-			glVertexAttribPointer(program.positionAttribute, 2, GL_FLOAT, false, 0, vertexData.data());
-			glEnableVertexAttribArray(program.positionAttribute);
+		modelMatrix.identity();
+		modelMatrix.Translate(gSquare.x, gSquare.y, 0);
+		modelMatrix.Scale(gSquare.scaleX, gSquare.scaleY, 1.0);
+		modelMatrix.Rotate(gSquare.rotation*PI / 180);
+		program.setModelMatrix(modelMatrix);
 
-			glVertexAttribPointer(program.texCoordAttribute, 2, GL_FLOAT, false, 0, texCoordData.data());
-			glEnableVertexAttribArray(program.texCoordAttribute);
+		gSquare.draw(program);
 
-			//viewMatrix.Translate(-TILE_SIZE*mapWidth / 2, TILE_SIZE*mapHeight / 2, 0.0f);
-			glDrawArrays(GL_TRIANGLES, 0, 6);
+		modelMatrix.identity();
+		modelMatrix.Translate(-1.3, 0.9, 0);
+		program.setModelMatrix(modelMatrix);
+		DrawText(&program, fontSheet, "Sorry it's only rectangles, but the collision is mostly on point", 0.07, -0.03);
 
-			glDisableVertexAttribArray(program.positionAttribute);
-			glDisableVertexAttribArray(program.texCoordAttribute);
-			
-			for (int i = 0; i < coinVector.size(); ++i){
-				if (coinVector[i].alive){
-					modelMatrix.identity();
-					modelMatrix.Translate(coinVector[i].x, coinVector[i].y, 0.0);
-					coinVector[i].draw(program);
-				}
-			}
-			modelMatrix.identity();
-			modelMatrix.Translate(player.x, player.y, 0.0);
-			player.draw(program);
-		}
-		else if (state == STATE_WIN_GAME){
-			viewMatrix.identity();
-			viewMatrix.Translate(-0.2f, 0.2f, 0.0f);
-			DrawText(&program, fontSheet, "YOU WIN!", 0.05f, 0.0f);
-		}
-		else if (state == STATE_LOSE_GAME){
-			viewMatrix.identity();
-			viewMatrix.Translate(-0.2f, 0.2f, 0.0f);
-			DrawText(&program, fontSheet, "YOU DIED", 0.05f, 0.0f);
-		}
+		modelMatrix.identity();
+		modelMatrix.Translate(-1.2, 0.8, 0);
+		program.setModelMatrix(modelMatrix);
+		DrawText(&program, fontSheet, "WASD to move, Q and E to rotate", 0.1, -0.02);
 
 		SDL_GL_SwapWindow(displayWindow);
 	}
