@@ -5,12 +5,15 @@ Entity::Entity(){
 	velocityY = 0.0f;
 	accelerationX = 0.0f;
 	accelerationY = 0.0f;
-	scaleX = 1.0f;
-	scaleY = 1.0f;
 };
 
 void Entity::draw(ShaderProgram program) {
 	unsigned int textureID = sprite.textureID;
+	float u = sprite.u;
+	float v = sprite.v;
+	float sWidth = sprite.width;
+	float sHeight = sprite.height;
+	float aspect = sWidth / sHeight;
 
 	glBindTexture(GL_TEXTURE_2D, textureID);
 	glEnable(GL_TEXTURE_2D);
@@ -18,21 +21,21 @@ void Entity::draw(ShaderProgram program) {
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
 	GLfloat texCoords[] = {
-		0, 1,
-		1, 0,
-		0, 0,
-		1, 0,
-		0, 1,
-		1, 1
+		u, v + sHeight,
+		u + sWidth, v,
+		u, v,
+		u + sWidth, v,
+		u, v + sHeight,
+		u + sWidth, v + sHeight
 	};
 
 	float vertices[] = {
-		-width/2, -height/2,
-		width/2, height/2,
-		-width/2, height/2,
-		width/2, height/2,
-		-width/2, -height/2,
-		width/2, -height/2
+		-size * aspect, -size,
+		size * aspect, size,
+		-size * aspect, size,
+		size * aspect, size,
+		-size * aspect, -size,
+		size * aspect, -size
 	};
 
 	glVertexAttribPointer(program.positionAttribute, 2, GL_FLOAT, false, 0, vertices);
@@ -48,39 +51,24 @@ void Entity::draw(ShaderProgram program) {
 
 }
 
-Vector Entity::getVector(float vX, float vY){
-	Vector vec;
-	float newX = vX;
-	float newY = vY;
-	newX *= scaleX;
-	vX *= scaleX;
-	newY *= scaleY;
-	vY *= scaleY;
-	newX = -vY*sin(rotation*PI / 180) + vX*cos(rotation*PI / 180);
-	newY = vY*cos(rotation*PI / 180) + vX*sin(rotation*PI / 180);
-	newX += x;
-	newY += y;
-
-	vec.x = newX;
-	vec.y = newY;
-	return vec;
+void Entity::resize(float newSize){
+	size = newSize;
+	height = size * 2;
+	width = size * 2;
 }
 
-std::vector<Vector> Entity::getVertices(){
-	std::vector<Vector> vv;
+bool Entity::collideEntity(Entity* other){
+	float thisTop = y + height / 2.0f;
+	float thisBottom = y - height / 2.0f;
+	float thisLeft = x - width / 2.0f;
+	float thisRight = x + width / 2.0f;
+	float otherTop = other->y + other->height / 2.0f;
+	float otherBottom = other->y - other->height / 2.0f;
+	float otherLeft = other->x - other->width / 2.0f;
+	float otherRight = other->x + other->width / 2.0f;
 
-	Vector v1 = getVector(-width / 2, height / 2);
-	vv.push_back(v1);
-
-	Vector v2 = getVector(width / 2, height / 2);
-	vv.push_back(v2);
-
-	Vector v3 = getVector(width / 2, -height / 2);
-	vv.push_back(v3);
-
-	Vector v4 = getVector(-width / 2, -height / 2);
-	vv.push_back(v4);
-
-	return vv;
+	if (thisBottom > otherTop || thisTop < otherBottom || thisLeft > otherRight || thisRight < otherLeft)
+		return false;
+	else
+		return true;
 }
-
